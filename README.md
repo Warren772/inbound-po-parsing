@@ -213,7 +213,7 @@ error: text_in_numeric_column.txt:6: column 'COST': not a number: 'N/A'
 Reads it, but its arithmetic disagrees — exit `1`, writes the workbook anyway:
 
 ```console
-$ python -m po2xlsx tests/fixtures/broken_po.txt --out out/broken.xlsx
+$ python -m po2xlsx tests/fixtures/broken_po.txt --out samples/broken_po.xlsx
 error: broken_po.txt:17: EXT QTY 12 != CTNS 5 x CSPK 2 (10)
 error: broken_po.txt:17: EXT COST 55.000 != COST 5.500 x EXT QTY 12 (66.000)
 error: broken_po.txt:19: EXT COST 99.999 != COST 2.250 x EXT QTY 12 (27.000)
@@ -221,6 +221,8 @@ error: broken_po.txt:21: TOTALS value 777.000 does not equal any column sum (ret
 warning: broken_po.txt: no Total Invoice Value on the document to cross-check
 warning: broken_po.txt:19: item 5552 has no UPC continuation line
 ```
+
+Open `samples/broken_po.xlsx` to see a flagged cell.
 
 ## What I would change with more time
 
