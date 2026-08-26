@@ -1,0 +1,31 @@
+BUYER: 007 SAM RIVERA        Tiny Trading Co.        1/05/2027
+SHIP TERMS: FOB Busan,KOR    PURCHASE ORDER          PO#: AB1
+                             SHIP DATE: 12/31/27
+
+VENDOR
+------
+ 90001 SMALL SUPPLIER GMBH
+ 12 KURZ STR
+
+SHIP TO                   BILL TO
+-------                   -------
+  1 NORTH DOCK              2 SOUTH OFFICE
+  BERLIN                    MUNICH
+
+DEPT ITEM#           VENDOR PART # DESCRIPTION              RETAIL   COST EXT COST CTNS CSPK EXT QTY   CUBE  KGS
+---- -----           ------------- -----------              ------   ---- -------- ---- ---- -------   ----  ---
+0042 5551            X-1           WIDE LOAD / BIG BOX       19.99  5.500   55.000    5    2      10 1.2345 3.10
+     0001234567890
+     5552            X-2           SMALL BOX                  9.99  2.250   27.000    4    3      12 0.5000 1.05
+     0009876543210
+PAGE : 1 of 2
+BUYER: 007 SAM RIVERA        Tiny Trading Co.        1/05/2027
+
+DEPT ITEM#           VENDOR PART # DESCRIPTION              RETAIL   COST EXT COST CTNS CSPK EXT QTY   CUBE  KGS
+---- -----           ------------- -----------              ------   ---- -------- ---- ---- -------   ----  ---
+0042 5553                          TALL BOX                  29.99 10.000   60.000    1    6       6 2.0000 4.00
+     0005555555555
+
+TOTALS:                              142.000   10        28       8.15
+
+Ad Month:                            Total Invoice Value: 142.00
