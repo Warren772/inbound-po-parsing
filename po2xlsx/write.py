@@ -55,10 +55,18 @@ def exact_decimal_serialisation():
 
     openpyxl formats every numeric cell with `"%.16g" % value`, which coerces a
     Decimal through float and prints its binary representation error.
+
+    Yields a list of warnings, empty when the patch took effect.
     """
+    warnings: list[str] = []
     original = getattr(_writer, "safe_string", None)
     if original is None:
-        yield
+        warnings.append(
+            f"openpyxl {openpyxl.__version__} does not expose "
+            "cell._writer.safe_string; Decimal values are written through "
+            "float and may not keep their printed scale"
+        )
+        yield warnings
         return
 
     def safe_string(value):
@@ -67,7 +75,7 @@ def exact_decimal_serialisation():
 
     _writer.safe_string = safe_string
     try:
-        yield
+        yield warnings
     finally:
         _writer.safe_string = original
 
@@ -77,7 +85,9 @@ def _resolve_total_cost(po: PurchaseOrder) -> Decimal | None:
     if po.header.total_invoice_value is not None:
         return po.header.total_invoice_value
     match = match_totals(po)
-    return match.matched.get("ext_cost") or match.sums.get("ext_cost")
+    # `or` would read a legitimate document total of exactly zero as absent.
+    matched = match.matched.get("ext_cost")
+    return match.sums.get("ext_cost") if matched is None else matched
 
 
 #: Normalised template heading -> attribute on Header, or on LineItem.
@@ -155,13 +165,25 @@ def write_workbook(
                 cell = sheet.cell(row=row, column=index)
                 cell.number_format = fmt
                 if value is not None:
-                    cell.value = value
+                    _set(cell, value, fmt)
             row += 1
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    with exact_decimal_serialisation():
+    with exact_decimal_serialisation() as precision_warnings:
         workbook.save(out_path)
-    return warnings
+    return warnings + precision_warnings
+
+
+def _set(cell, value, fmt) -> None:
+    """Assign a cell, keeping source text as text.
+
+    openpyxl types any string beginning with "=" as a formula, so a vendor
+    description reading `=HYPERLINK(...)` would reach Excel as live code rather
+    than as the characters the PO printed.
+    """
+    cell.value = value
+    if fmt == TEXT and isinstance(value, str):
+        cell.data_type = "s"
 
 
 def _cell(po, item, key, total_cost_mode, document_total):

@@ -4,7 +4,11 @@ import openpyxl
 import pytest
 
 from po2xlsx.cli import main
-from po2xlsx.write import number_format, write_workbook
+from po2xlsx.write import (
+    exact_decimal_serialisation,
+    number_format,
+    write_workbook,
+)
 
 from conftest import SAMPLE, TEMPLATE, TEMPLATE_COLUMNS
 
@@ -225,3 +229,26 @@ def test_summary_names_what_totals_cross_checked(template, tmp_path, capsys):
           "--out", str(tmp_path / "out.xlsx")])
     out = capsys.readouterr().out
     assert "TOTALS cross-checked ext_cost, ctns, ext_qty, kilograms" in out
+
+
+def test_precision_patch_reports_when_it_cannot_take_effect(monkeypatch):
+    """Exact Decimal output rides on an openpyxl internal, so an upgrade can
+    take it away."""
+    from openpyxl.cell import _writer
+
+    monkeypatch.delattr(_writer, "safe_string")
+    with exact_decimal_serialisation() as warnings:
+        pass
+    assert any("may not keep their printed scale" in w for w in warnings)
+
+
+def test_precision_patch_is_removed_again_afterwards():
+    """It edits a module global: leaving it installed would leak into any other
+    openpyxl use in the same process."""
+    from openpyxl.cell import _writer
+
+    before = _writer.safe_string
+    with exact_decimal_serialisation() as warnings:
+        assert _writer.safe_string is not before
+        assert warnings == []
+    assert _writer.safe_string is before

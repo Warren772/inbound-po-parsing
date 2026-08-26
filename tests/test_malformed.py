@@ -21,12 +21,15 @@ REJECTED = {
     "impossible_ship_date.txt": "not a valid date",
     "no_item_table.txt": "no item table found",
     "orphan_upc.txt": "no preceding item line",
+    "shifted_second_page.txt": "differs from page one's",
     "tabbed_columns.txt": "tab character",
     "text_in_numeric_column.txt": "not a number",
     "wrapped_description.txt": "only free-text columns",
 }
 ACCEPTED = {
     "credit_lines.txt",
+    "grand_totals_after_subtotal.txt",
+    "page_marker_in_description.txt",
     "formula_injection.txt",
     "label_in_description.txt",
     "missing_page.txt",
@@ -68,6 +71,7 @@ def test_rejected_file_names_itself_and_says_why(name, phrase):
     [
         ("duplicate_qty_columns.txt", 5),   # the ruler line
         ("orphan_upc.txt", 6),
+        ("shifted_second_page.txt", 11),   # the second page's ruler
         ("tabbed_columns.txt", 6),
         ("text_in_numeric_column.txt", 6),
         ("wrapped_description.txt", 7),
@@ -128,6 +132,32 @@ def test_a_page_subtotal_never_becomes_a_line_item():
     assert Decimal("82.000") not in [item.ext_cost for item in po.items]
 
 
+def test_a_grand_total_beats_a_final_page_subtotal():
+    """The last page can print its own subtotal before the document's GRAND
+    TOTALS."""
+    po = load("grand_totals_after_subtotal.txt")
+    assert [item.sku for item in po.items] == ["5551", "5553"]
+    assert po.totals == [
+        Decimal("115.000"), Decimal("6"), Decimal("16"), Decimal("7.10")
+    ]
+    assert [i for i in validate(po) if i.severity == ERROR] == []
+
+
+def test_a_page_that_moves_its_columns_is_refused():
+    """Every page is sliced at page one's offsets. A page that shifted a column
+    would still yield rows, filled with the wrong fields."""
+    assert "cannot be sliced at the same offsets" in rejects("shifted_second_page.txt")
+
+
+def test_a_description_reading_like_a_page_marker_is_not_a_page_count():
+    """`CATALOG PAGE 2 OF 9` inside a description must not claim the document
+    has nine pages, which would raise a false missing-page warning and fail
+    an otherwise valid file under --strict."""
+    po = load("page_marker_in_description.txt")
+    assert po.pages_declared == 1
+    assert not [i for i in validate(po) if "declares" in i.message]
+
+
 def test_upc_printed_in_its_own_column_is_kept():
     """The template has a UPC column; a PO that fills one inline rather than on
     a continuation line must not lose it."""
@@ -166,6 +196,33 @@ def test_credits_keep_their_sign_and_still_reconcile():
 
 
 # --- the workbook side ----------------------------------------------------
+
+
+def test_leading_equals_is_written_as_text_not_as_a_formula(template, tmp_path):
+    """A vendor controls the description text. openpyxl types any string
+    starting with '=' as a formula, so it would reach Excel as live code."""
+    out = tmp_path / "out.xlsx"
+    write_workbook([load("formula_injection.txt")], template, out)
+
+    sheet = openpyxl.load_workbook(out).active
+    headings = [c.value for c in sheet[1]]
+    for heading, expected in [
+        ("Description", '=HYPERLINK("http://x")'),
+        ("BUYER", "=cmd|' /C calc'!A0"),
+    ]:
+        cell = sheet.cell(row=2, column=headings.index(heading) + 1)
+        assert cell.value == expected
+        assert cell.data_type == "s"
+
+
+def test_no_formula_reaches_the_saved_file(template, tmp_path):
+    import zipfile
+
+    out = tmp_path / "out.xlsx"
+    write_workbook([load("formula_injection.txt")], template, out)
+    with zipfile.ZipFile(out) as archive:
+        xml = archive.read("xl/worksheets/sheet1.xml").decode()
+    assert "<f>" not in xml
 
 
 @pytest.mark.parametrize("name", sorted(ACCEPTED))

@@ -313,11 +313,13 @@ class PurchaseOrder:
 BLOCK_JOINER = " | "
 
 _TOTALS_RE = re.compile(r"^\s*(?:GRAND\s+)?TOTALS?\s*[:.]?\s", re.IGNORECASE)
+_GRAND_TOTALS_RE = re.compile(r"^\s*GRAND\s+TOTALS?\s*[:.]?\s", re.IGNORECASE)
 _RULER_RE = re.compile(r"^[ \t]*-[- \t]*$")
 _PAGE_RE = re.compile(r"^\s*(?:PAGE|PG)\s*[:.]?\s*\d", re.IGNORECASE)
-#: The total page count out of a `PAGE : 1 of 3` marker.
+#: The total page count out of a `PAGE : 1 of 3` marker, which prints at a line
+#: start or after a gutter, never mid-sentence inside a description.
 _PAGE_OF_RE = re.compile(
-    r"(?:PAGE|PG)\s*[:.]?\s*\d+\s*(?:OF|/)\s*(\d+)", re.IGNORECASE
+    r"(?:^|\s{2,})(?:PAGE|PG)\s*[:.]?\s*\d+\s*(?:OF|/)\s*(\d+)", re.IGNORECASE
 )
 _LABEL_RE = re.compile(
     r"(?:^|\s{2,})"                                  # line start or a gutter
@@ -451,11 +453,18 @@ def parse_po(text: str, filename: str) -> PurchaseOrder:
             filename=filename,
         )
 
-    # The document's TOTALS follows the last item table.
+    _reject_layout_drift(lines, rulers, filename)
+
+    # Items stop at the first TOTALS after the last table, but the numbers to
+    # reconcile against come from GRAND TOTALS when the document prints one.
+    candidates = [
+        i for i in range(rulers[-1], len(lines)) if _TOTALS_RE.match(lines[i])
+    ]
+    end_idx = candidates[0] if candidates else len(lines)
     totals_idx = next(
-        (i for i in range(rulers[-1], len(lines)) if _TOTALS_RE.match(lines[i])), None
+        (i for i in candidates if _GRAND_TOTALS_RE.match(lines[i])),
+        candidates[0] if candidates else None,
     )
-    end_idx = len(lines) if totals_idx is None else totals_idx
 
     # The header is read first so that page breaks reprinting it mid-table can
     # be recognised and skipped rather than parsed as items.
@@ -485,6 +494,23 @@ def parse_po(text: str, filename: str) -> PurchaseOrder:
         pages_seen=len(rulers),
         pages_declared=_declared_pages(lines),
     )
+
+
+def _reject_layout_drift(lines: list[str], rulers: list[int], filename: str) -> None:
+    """Refuse a document whose pages do not share one column geometry.
+
+    Every page is sliced at offsets derived from page one's ruler. A page that
+    moved or resized a column would still yield rows.
+    """
+    first = _runs(lines[rulers[0]])
+    for ruler in rulers[1:]:
+        if _runs(lines[ruler]) != first:
+            raise ParseError(
+                "this page's column ruler differs from page one's, so its rows "
+                "cannot be sliced at the same offsets",
+                filename=filename,
+                line_no=ruler + 1,
+            )
 
 
 def _declared_pages(lines: list[str]) -> int | None:
