@@ -1,0 +1,56 @@
+BUYER: 610 JORDAN MILLER                          Meridian Sourcing Co. Inc.                    3/14/2026
+SHIP TERMS: FOB Ningbo,CHN                        PURCHASE ORDER                                PO#: TX9K2QP
+                                                   REF MASTER PO#: TX9H1LM
+                                                   SHIP DATE: 5/02/26
+
+VENDOR
+------
+ 50201 HARBOR POINT TRADING LTD
+ C/O MERIDIAN SOURCING CO INC
+ 410 COMMERCE AVE
+ EDISON NJ 08837
+ PHONE : 9085551040
+ FAX : 9085551099
+
+SHIP TO                                    BILL TO
+-------                                    -------
+  331 DISTRIBUTION/NORTHEAST                  331 MERIDIAN SOURCING CO. INC.
+  C/O SWIFTLINE EXPRESS                       C/O NORTHSTAR RETAIL GROUP - DEPT OPS
+  1450 CROSSROADS BLVD                        PO BOX 4021
+  EDISON, NJ 08817                            EDISON, NJ 08837
+  PHONE : 9085551088
+
+DPT SKU/UPC       VENDOR PART#  DESCRIPTION                           RETAIL     COST   EXT COST  CTNS  CSPK  EXT QTY    CUBE  KILOGRAMS
+--- -------       ------------  -----------                           ------     ----   --------  ----  ----  -------    ----  ---------
+210 71097188      04212         NORDPEAK ASHER T CMFST GRY            149.99   49.400   6718.400    68     2      136  0.0991       7.72
+    0091120032129
+210 71097195      04213         NORDPEAK ASHER FQ CMFST GRY           179.99   61.600  82913.600   673     2     1346  0.1349       9.96
+    0091120032136
+210 71097201      04214         NORDPEAK ASHER K CMFST GRY            199.99   70.300  80423.200   572     2     1144  0.1549      12.23
+    0091120032143
+210 71097218      04215         NORDPEAK SIMONE T CMFST BLU           149.99   49.400  10077.600   102     2      204  0.0991       7.72
+    0091120032150
+210 71097225      04216         NORDPEAK SIMONE FQ CMFST BLU          179.99   61.600 124801.600  1013     2     2026  0.1349       9.96
+    0091120032167
+210 71097232      04217         NORDPEAK SIMONE K CMFST BLU           199.99   70.300 120494.200   857     2     1714  0.1549      12.23
+    0091120032174
+210 71293238      04237         NORDPEAK ASHER STRIPE T DVT GRAY      129.99   44.460    444.600     5     2       10  0.0179       8.69
+    0091120032372
+210 71293245      04238         NORDPEAK ASHER STRIPE F/Q DVT GRAY    149.99   55.440   4324.320    39     2       78  0.0215       9.66
+    0091120032389
+210 71293252      04239         NORDPEAK ASHER STRIPE K DVT GRAY      169.99   63.220   4046.080    32     2       64  0.0242      11.33
+    0091120032396
+210 71293269      04240         NORDPEAK SIMONE T DVT BLUE            129.99   44.460    711.360     8     2       16  0.0179       8.69
+    0091120032402
+210 71293276      04241         NORDPEAK SIMONE F/Q DVT BLUE          149.99   55.440   6431.040    58     2      116  0.0215       9.66
+    0091120032419
+210 71293283      04242         NORDPEAK SIMONE K DVT BLUE            169.99   63.220   6069.120    48     2       96  0.0242      11.33
+    0091120032426
+
+TOTALS:                                                             447455.120  3475           6950             119.18
+
+Season Code:              Agent:                Percentage:
+Ad Month:                                       Total Invoice Value: 447,455.12
+PAGE : 1 of 1                    MERIDIAN BRANDS
+
+The Ref Master# is for reference only. All commercial documents and carton markings should reflect the PO#.
