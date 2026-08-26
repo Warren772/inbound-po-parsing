@@ -48,6 +48,8 @@ COLUMN_ALIASES: dict[str, str] = {
     "DPT": "dept", "DEPT": "dept", "DEPARTMENT": "dept", "DIV": "dept",
     "SKU": "sku", "SKU/UPC": "sku", "ITEM": "sku", "ITEM#": "sku",
     "ITEMNO": "sku", "STYLE": "sku",
+    # For a PO printing the UPC in its own column, not on a continuation line.
+    "UPC": "upc", "UPC#": "upc", "UPCCODE": "upc", "EAN": "upc", "GTIN": "upc",
     "VENDORPART#": "vendor_part", "VENDORPART": "vendor_part",
     "VENDPART#": "vendor_part", "VENDORSTYLE": "vendor_part",
     "DESCRIPTION": "description", "DESC": "description",
@@ -68,6 +70,9 @@ COLUMN_ALIASES: dict[str, str] = {
 NUMERIC_COLUMNS = frozenset(
     {"retail", "cost", "ext_cost", "ctns", "cspk", "ext_qty", "cube", "kilograms"}
 )
+
+#: The fields a printed label can resolve to.
+CANONICAL_COLUMNS = frozenset(COLUMN_ALIASES.values())
 
 #: How many recognised columns a dashed line must underline before we accept it
 #: as the item-table ruler rather than an address-block underline.
@@ -164,6 +169,18 @@ def derive_layout(header_line: str, ruler_line: str, rows: list[str]) -> Layout:
         label = header_line[start:end].strip() if start < len(header_line) else ""
         key = _norm_label(label)
         columns.append(Column(COLUMN_ALIASES.get(key, key), label, start, end))
+
+    # Two headings for one field leave no way to choose but a silent guess.
+    seen: dict[str, str] = {}
+    for col in columns:
+        if col.name not in CANONICAL_COLUMNS:
+            continue
+        if col.name in seen:
+            raise ValueError(
+                f"columns {seen[col.name]!r} and {col.label!r} both mean "
+                f"{col.name!r}; cannot tell which one the output should carry"
+            )
+        seen[col.name] = col.label
     return Layout(tuple(columns))
 
 
@@ -281,6 +298,9 @@ class PurchaseOrder:
     #: Numbers printed on the TOTALS line, left to right, with their line number.
     totals: list[Decimal] = field(default_factory=list)
     totals_line_no: int | None = None
+    #: Item tables read, cross-checked against the count the document claims.
+    pages_seen: int = 1
+    pages_declared: int | None = None
 
 
 # --------------------------------------------------------------------------
@@ -293,8 +313,14 @@ class PurchaseOrder:
 BLOCK_JOINER = " | "
 
 _TOTALS_RE = re.compile(r"^\s*(?:GRAND\s+)?TOTALS?\s*[:.]?\s", re.IGNORECASE)
+_GRAND_TOTALS_RE = re.compile(r"^\s*GRAND\s+TOTALS?\s*[:.]?\s", re.IGNORECASE)
 _RULER_RE = re.compile(r"^[ \t]*-[- \t]*$")
 _PAGE_RE = re.compile(r"^\s*(?:PAGE|PG)\s*[:.]?\s*\d", re.IGNORECASE)
+#: The total page count out of a `PAGE : 1 of 3` marker, which prints at a line
+#: start or after a gutter, never mid-sentence inside a description.
+_PAGE_OF_RE = re.compile(
+    r"(?:^|\s{2,})(?:PAGE|PG)\s*[:.]?\s*\d+\s*(?:OF|/)\s*(\d+)", re.IGNORECASE
+)
 _LABEL_RE = re.compile(
     r"(?:^|\s{2,})"                                  # line start or a gutter
     r"([A-Za-z][A-Za-z0-9#/&.'\-]*(?:[ ][A-Za-z0-9#/&.'\-]+)*)"  # label words
@@ -308,15 +334,18 @@ def _is_ruler(line: str) -> bool:
     return bool(line.strip()) and bool(_RULER_RE.match(line))
 
 
-def _labels_in(line: str) -> list[tuple[str, str]]:
-    """Every `LABEL: value` pair on one physical line.
-    """
+def _labels_in(line: str) -> list[tuple[str, str, int]]:
+    """Every `(label, value, column)` triple on one physical line."""
     found = []
     matches = list(_LABEL_RE.finditer(line))
     for i, m in enumerate(matches):
         stop = matches[i + 1].start() if i + 1 < len(matches) else len(line)
         rest = line[m.end() : stop].lstrip()
-        found.append((_norm_label(m.group(1)), _VALUE_END_RE.split(rest, 1)[0].strip()))
+        found.append((
+            _norm_label(m.group(1)),
+            _VALUE_END_RE.split(rest, 1)[0].strip(),
+            m.start(1),
+        ))
     return found
 
 
@@ -377,21 +406,34 @@ def _find_item_rulers(lines: list[str]) -> list[int]:
     return hits
 
 
-def _is_furniture(line: str, header_line: str, reprinted: frozenset[str]) -> bool:
-    """Page headers, footers and rulers reprinted in the middle of the table.
+@dataclass(frozen=True)
+class _PageFurniture:
+    """Text this document's own header printed, and the column it printed at.
 
-    `reprinted` holds the normalised labels, block titles and block body lines
-    this document's own header used -- the only text a page break can repeat.
+    A page break reprints its header verbatim at the same offsets, so the
+    column tells a reprint apart from an item that merely contains a colon.
     """
+
+    #: Whole normalised lines: block titles and block bodies.
+    lines: frozenset[str]
+    #: `(label, column)` for every `LABEL:` the header printed.
+    labels: frozenset[tuple[str, int]]
+
+
+def _is_furniture(line: str, header_line: str, furniture: _PageFurniture) -> bool:
+    """Page headers, footers, rulers and subtotals printed inside the table."""
     if not line.strip() or "\f" in line:
         return True
     if _PAGE_RE.match(line) or _is_ruler(line):
         return True
+    # A TOTALS line inside the table is a per-page subtotal.
+    if _TOTALS_RE.match(line):
+        return True
     if _norm_label(line) == _norm_label(header_line):
         return True
-    if _norm_label(line) in reprinted:
+    if _norm_label(line) in furniture.lines:
         return True
-    return any(label in reprinted for label, _ in _labels_in(line))
+    return any((label, col) in furniture.labels for label, _, col in _labels_in(line))
 
 
 # --------------------------------------------------------------------------
@@ -411,18 +453,27 @@ def parse_po(text: str, filename: str) -> PurchaseOrder:
             filename=filename,
         )
 
+    _reject_layout_drift(lines, rulers, filename)
+
+    # Items stop at the first TOTALS after the last table, but the numbers to
+    # reconcile against come from GRAND TOTALS when the document prints one.
+    candidates = [
+        i for i in range(rulers[-1], len(lines)) if _TOTALS_RE.match(lines[i])
+    ]
+    end_idx = candidates[0] if candidates else len(lines)
     totals_idx = next(
-        (i for i in range(rulers[0], len(lines)) if _TOTALS_RE.match(lines[i])), None
+        (i for i in candidates if _GRAND_TOTALS_RE.match(lines[i])),
+        candidates[0] if candidates else None,
     )
-    end_idx = len(lines) if totals_idx is None else totals_idx
 
     # The header is read first so that page breaks reprinting it mid-table can
     # be recognised and skipped rather than parsed as items.
-    header, reprinted = _read_header(lines, rulers[0], end_idx, filename)
+    header, furniture = _read_header(lines, rulers[0], end_idx, filename)
 
     header_line = lines[rulers[0] - 1]
-    rows = _collect_rows(lines, rulers, end_idx, header_line, reprinted)
-    layout = derive_layout(header_line, lines[rulers[0]], [text_ for _, text_ in rows])
+    rows = _collect_rows(lines, rulers, end_idx, header_line, furniture)
+    _reject_tabs(lines, rulers, rows, filename)
+    layout = _derive_item_layout(lines, rulers[0], rows, filename)
     items = _build_items(rows, layout, filename)
 
     totals: list[Decimal] = []
@@ -440,7 +491,65 @@ def parse_po(text: str, filename: str) -> PurchaseOrder:
         layout=layout,
         totals=totals,
         totals_line_no=None if totals_idx is None else totals_idx + 1,
+        pages_seen=len(rulers),
+        pages_declared=_declared_pages(lines, {n - 1 for n, _ in rows}),
     )
+
+
+def _reject_layout_drift(lines: list[str], rulers: list[int], filename: str) -> None:
+    """Refuse a document whose pages do not share one column geometry.
+
+    Every page is sliced at offsets derived from page one's ruler. A page that
+    moved or resized a column would still yield rows.
+    """
+    first = _runs(lines[rulers[0]])
+    for ruler in rulers[1:]:
+        if _runs(lines[ruler]) != first:
+            raise ParseError(
+                "this page's column ruler differs from page one's, so its rows "
+                "cannot be sliced at the same offsets",
+                filename=filename,
+                line_no=ruler + 1,
+            )
+
+
+def _declared_pages(lines: list[str], item_rows: set[int]) -> int | None:
+    """The largest page count the document claims, or None if it never says.
+    """
+    declared = [
+        int(m.group(1))
+        for i, line in enumerate(lines)
+        if i not in item_rows and (m := _PAGE_OF_RE.search(line))
+    ]
+    return max(declared) if declared else None
+
+
+def _reject_tabs(
+    lines: list[str], rulers: list[int], rows: list[tuple[int, str]], filename: str
+) -> None:
+    """Refuse a table containing tabs rather than guessing the tab stop.
+    """
+    frame = [(i, lines[i - 1]) for i in rulers] + [(i + 1, lines[i]) for i in rulers]
+    for line_no, text in frame + rows:
+        if "\t" in text:
+            raise ParseError(
+                "tab character in the item table; columns are sliced by "
+                "character offset and the tab stop is not recoverable",
+                filename=filename,
+                line_no=line_no,
+            )
+
+
+def _derive_item_layout(
+    lines: list[str], ruler_idx: int, rows: list[tuple[int, str]], filename: str
+) -> Layout:
+    """`derive_layout` against the document, with the ruler line named on error."""
+    try:
+        return derive_layout(
+            lines[ruler_idx - 1], lines[ruler_idx], [text for _, text in rows]
+        )
+    except ValueError as exc:
+        raise ParseError(str(exc), filename=filename, line_no=ruler_idx + 1) from None
 
 
 def _collect_rows(
@@ -448,7 +557,7 @@ def _collect_rows(
     rulers: list[int],
     end_idx: int,
     header_line: str,
-    reprinted: frozenset[str],
+    furniture: _PageFurniture,
 ) -> list[tuple[int, str]]:
     """(line_no, text) for every real table row, across every page."""
     rows = []
@@ -456,7 +565,7 @@ def _collect_rows(
         # A page's table runs to the next page's column headings, or to TOTALS.
         stop = rulers[page + 1] - 1 if page + 1 < len(rulers) else end_idx
         for i in range(ruler + 1, min(stop, end_idx)):
-            if not _is_furniture(lines[i], header_line, reprinted):
+            if not _is_furniture(lines[i], header_line, furniture):
                 rows.append((i + 1, lines[i]))
     return rows
 
@@ -465,8 +574,10 @@ def _build_items(
     rows: list[tuple[int, str]], layout: Layout, filename: str
 ) -> list[LineItem]:
     """Fold physical rows into records, attaching each continuation upward."""
-    sku_col = layout.by_name("sku")
-    other_cols = [c for c in layout.columns if c is not sku_col]
+    # The continuation line prints under whichever column carries the UPC.
+    id_cols = [c for c in (layout.by_name("upc"), layout.by_name("sku")) if c]
+    # What a row has to fill to be a line item at all.
+    substantive = id_cols + [c for c in layout.columns if c.name in NUMERIC_COLUMNS]
     items: list[LineItem] = []
 
     for line_no, row in rows:
@@ -478,10 +589,11 @@ def _build_items(
                 line_no=line_no,
             )
         # A continuation carries a value in the SKU/UPC column and nothing else.
-        if sku_col is not None and filled == [sku_col]:
+        if len(filled) == 1 and filled[0] in id_cols:
+            value = filled[0].slice(row)
             if not items:
                 raise ParseError(
-                    f"continuation row {sku_col.slice(row)!r} has no preceding "
+                    f"continuation row {value!r} has no preceding "
                     "item line to attach to",
                     filename=filename,
                     line_no=line_no,
@@ -490,12 +602,22 @@ def _build_items(
                 raise ParseError(
                     f"item {items[-1].sku!r} already carries UPC "
                     f"{items[-1].upc!r}; a second continuation "
-                    f"{sku_col.slice(row)!r} is unexpected",
+                    f"{value!r} is unexpected",
                     filename=filename,
                     line_no=line_no,
                 )
-            items[-1].upc = sku_col.slice(row)
+            items[-1].upc = value
             continue
+
+        # A text-only row is a wrapped description
+        if not any(c in filled for c in substantive):
+            printed = "; ".join(f"{c.label}={c.slice(row)!r}" for c in filled)
+            raise ParseError(
+                "row fills only free-text columns -- no SKU, quantity or "
+                f"money value, so it cannot be a line item ({printed})",
+                filename=filename,
+                line_no=line_no,
+            )
 
         item = LineItem(line_no=line_no)
         for col in layout.columns:
@@ -517,13 +639,16 @@ def _build_items(
 
 def _read_header(
     lines: list[str], first_ruler: int, end_idx: int, filename: str
-) -> tuple[Header, frozenset[str]]:
+) -> tuple[Header, _PageFurniture]:
     """Read the block above the table plus the footer below TOTALS.
 
-    Returns the header and the set of normalised labels and block titles it saw.
+    Returns the header and the furniture a page break may reprint mid-table.
     """
     header = Header()
-    reprinted: set[str] = set()
+    reprinted_lines: set[str] = set()
+    reprinted_labels: set[tuple[str, int]] = set()
+    # Where each label was printed, so a bad value can name its own line.
+    label_lines: dict[str, int] = {}
 
     consumed: set[int] = set()
     for i in range(first_ruler - 1):
@@ -533,7 +658,7 @@ def _read_header(
         if block is None:
             continue
         consumed.update(range(block.start, block.end))
-        reprinted.update(block.cells)
+        reprinted_lines.update(block.cells)
         for title, value in block.cells.items():
             if title == "VENDOR":
                 header.vendor = value
@@ -543,18 +668,22 @@ def _read_header(
                 header.bill_to = value
 
     # A page break can reprint an entire VENDOR or SHIP TO block.
-    reprinted.update(
+    reprinted_lines.update(
         norm for i in consumed if (norm := _norm_label(lines[i]))
     )
 
     above = [i for i in range(first_ruler - 1) if i not in consumed]
     for i in above:
-        for label, value in _labels_in(lines[i]):
-            header.labels.setdefault(label, value)
-            reprinted.add(label)        # a page break can reprint this line
+        for label, value, col in _labels_in(lines[i]):
+            if label not in header.labels:
+                header.labels[label] = value
+                label_lines[label] = i + 1
+            reprinted_labels.add((label, col))   # a page break reprints this
     for i in range(end_idx, len(lines)):
-        for label, value in _labels_in(lines[i]):
-            header.labels.setdefault(label, value)
+        for label, value, _ in _labels_in(lines[i]):
+            if label not in header.labels:
+                header.labels[label] = value
+                label_lines[label] = i + 1
 
     header.buyer = header.labels.get("BUYER", "")
     header.ship_terms = header.labels.get("SHIPTERMS", "")
@@ -562,15 +691,19 @@ def _read_header(
     header.ref_master_po = _first(header.labels, "REFMASTERPO#", "MASTERPO#")
 
     header.ship_date = _scalar(
-        parse_date, header.labels.get("SHIPDATE", ""), "SHIP DATE", filename
+        parse_date, header.labels.get("SHIPDATE", ""), "SHIP DATE", filename,
+        label_lines.get("SHIPDATE"),
     ) or ""
     header.total_invoice_value = _scalar(
         parse_decimal,
         header.labels.get("TOTALINVOICEVALUE", ""),
         "Total Invoice Value",
         filename,
+        label_lines.get("TOTALINVOICEVALUE"),
     )
-    return header, frozenset(reprinted)
+    return header, _PageFurniture(
+        frozenset(reprinted_lines), frozenset(reprinted_labels)
+    )
 
 
 def _first(labels: dict[str, str], *keys: str) -> str:
@@ -578,8 +711,10 @@ def _first(labels: dict[str, str], *keys: str) -> str:
     return next((labels[k] for k in keys if labels.get(k)), "")
 
 
-def _scalar(convert, raw: str, field_name: str, filename: str):
+def _scalar(convert, raw: str, field_name: str, filename: str, line_no: int | None):
     try:
         return convert(raw)
     except ValueError as exc:
-        raise ParseError(f"{field_name}: {exc}", filename=filename) from None
+        raise ParseError(
+            f"{field_name}: {exc}", filename=filename, line_no=line_no
+        ) from None

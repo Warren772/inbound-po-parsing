@@ -1,0 +1,12 @@
+BUYER: 007 SAM RIVERA        Tiny Trading Co.        1/05/2027
+SHIP TERMS: FOB Busan,KOR    PURCHASE ORDER          PO#: AB1
+                             SHIP DATE: 12/31/27
+
+DEPT ITEM#           VENDOR PART # DESCRIPTION              RETAIL   COST EXT COST CTNS CSPK EXT QTY   CUBE  KGS
+---- -----           ------------- -----------              ------   ---- -------- ---- ---- -------   ----  ---
+0042 5551            X-1           PO#: SEE MASTER           19.99  5.500   55.000    5    2      10 1.2345 3.10
+     0001234567890
+0042 5552            X-2           SHIP DATE: ON FILE         9.99  2.250   27.000    4    3      12 0.5000 1.05
+     0009876543210
+
+TOTALS:                               82.000    9        22       4.15

@@ -28,6 +28,10 @@ Exit codes: `0` clean, `1` validation errors (the workbook is still written),
 .venv/bin/python -m pytest
 ```
 
+CI runs the suite on Python 3.11–3.13, again with `lxml` installed (openpyxl
+swaps its whole serialiser when it is present), and then replays it at **every
+commit** a push or PR adds, so the history stays bisectable.
+
 ## How the columns are found
 
 The item table's geometry is derived from the document.
@@ -90,7 +94,21 @@ reinterpret them under a local date format.
 Slash dates are read US-style, month first. A first component above 12 is read
 day-first instead.
 
+### What is refused
+
+A document this parser cannot read fails with the file and line named, rather
+than producing a workbook from a misreading. `tests/fixtures/malformed/` holds
+one whole PO per failure mode. Refused:
+
+* **tabs inside the item table** — geometry here is counted in characters
+* **two headings meaning one field** (`QTY` beside `EXT QTY`)
+* **a row that fills only free-text columns** — no SKU, quantity or money.
+* **a page whose ruler differs from page one's** — every page is sliced at page one's offsets.
+
 ### Types
+
+A `UPC` is read from a continuation line under the SKU column, or from its own
+column when the document prints one.
 
 `UPC`, `SKU`, `Dept` and `Vendor Part #` keep their leading zeros and are
 written with Excel's text format (`@`) set explicitly, not as Python
@@ -102,7 +120,11 @@ float.
 One wrinkle worth flagging: openpyxl formats numeric cells with `"%.16g" %
 value`, which coerces a `Decimal` through `float` and writes
 `82913.60000000001` into the XML. The stored double is identical either way,
-but `write.py` replaces this logic, so **beware if using future verisons of openpyxl**
+but `write.py` replaces this logic, so **beware if using future verisons of
+openpyxl**.
+
+**Text cells are never formulas.** openpyxl types any string beginning with `=`
+as a formula.
 
 Blank entries stay blank in output
 
@@ -111,7 +133,15 @@ Blank entries stay blank in output
 Headings, rulers and page furniture are skipped where they repeat mid-file.
 
 Furniture is recognized by matching against the labels and block titles this
-document's *own* header used, plus `PAGE :` markers and form feeds.
+document's *own* header used, plus `PAGE :` markers and form feeds. A label is
+matched **together with the column it was printed at**.
+
+**The item block ends at the TOTALS line after the *last* item table** A PO that prints a per-page subtotal and a final
+`GRAND TOTALS` would otherwise end at page one. Where both are printed, the
+grand total is the one reconciled against.
+
+As a backstop, a `PAGE : 1 of 3` marker is cross-checked against the number of
+item tables read.
 
 ## Validation
 
@@ -125,6 +155,7 @@ Checks run against every file and report to stderr as
 * header fields that came through blank are listed (warning)
 * items with no UPC continuation, and duplicate UPCs (warning)
 * `RETAIL` below `COST`, non-positive quantities (warning)
+* the page count the document declares vs. the item tables read (warning)
 
 Errors set exit code `1`; warnings do not unless `--strict` is passed.
 
@@ -150,6 +181,8 @@ po2xlsx/validate.py   the math checks
 po2xlsx/write.py      records -> workbook
 po2xlsx/cli.py        arguments, batch loop, error reporting
 samples/              the provided sample PO
-templates/            the provided blank template (not committed)
+templates/            the provided blank template
 tests/                pytest, with hand-built trimmed test cases
+tests/fixtures/malformed/   one whole PO per failure mode
+.github/workflows/ci.yml    matrix tests, lxml leg, per-commit replay
 ```

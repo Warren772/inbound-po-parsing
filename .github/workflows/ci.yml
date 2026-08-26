@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+      # The .xlsx writer reaches into an openpyxl internal to keep Decimals
+      # exact, and openpyxl swaps its whole serialiser when lxml is present.
+      # Both paths have to hold, so the suite runs twice.
+      - name: pytest with lxml installed
+        run: |
+          python -m pip install lxml
+          python -m pytest -q
+
+      - name: end to end against the real sample and template
+        run: |
+          python -m po2xlsx samples/*.txt \
+            --template templates/output_template_blank.xlsx \
+            --out out/purchase_orders.xlsx
+          test -s out/purchase_orders.xlsx
+
+  every-commit:
+    # History has to stay bisectable: a failure three commits back is a
+    # failure, even if the branch tip is green. This replays the suite at
+    # every commit the push or PR adds.
+    name: pytest at every commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: work out which commits this push or PR adds
+        id: range
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # A new branch, a force push or a manual run reports no usable base;
+          # fall back to the whole history rather than checking nothing.
+          if [ -z "${BASE}" ] || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            commits=$(git rev-list --reverse "${HEAD}")
+          else
+            commits=$(git rev-list --reverse "${BASE}..${HEAD}")
+          fi
+          echo "commits<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${commits}" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - run: python -m pip install --upgrade pip openpyxl pytest
+
+      - name: run the suite at each commit
+        env:
+          COMMITS: ${{ steps.range.outputs.commits }}
+        run: |
+          set -uo pipefail
+          failed=""
+          for sha in ${COMMITS}; do
+            subject=$(git log -1 --format=%s "${sha}")
+            git checkout --quiet --force "${sha}"
+            git clean -qfdx --exclude=.venv
+            if [ ! -d tests ]; then
+              echo "::notice::${sha:0:8} has no tests yet (${subject}) - skipped"
+              continue
+            fi
+            echo "::group::${sha:0:8} ${subject}"
+            if PYTHONPATH="${PWD}" python -m pytest -q; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::${sha:0:8} (${subject}) does not pass its own tests"
+              failed="${failed} ${sha:0:8}"
+            fi
+          done
+          if [ -n "${failed}" ]; then
+            echo "commits that fail their own tests:${failed}"
+            exit 1
+          fi

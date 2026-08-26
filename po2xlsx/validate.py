@@ -88,6 +88,7 @@ def validate(po: PurchaseOrder) -> list[Issue]:
     _check_row_arithmetic(po, add)
     _check_totals(po, add)
     _check_completeness(po, add)
+    _check_pages(po, add)
     return issues
 
 
@@ -116,7 +117,19 @@ def _check_row_arithmetic(po: PurchaseOrder, add) -> None:
         for name in ("ctns", "cspk", "ext_qty"):
             value = getattr(item, name)
             if value is not None and value <= 0:
-                add(WARNING, f"{name.upper()} is {value}", item.line_no)
+                printed = name.upper().replace("_", " ")
+                add(WARNING, f"{printed} is {value}", item.line_no)
+
+
+def _check_pages(po: PurchaseOrder, add) -> None:
+    """Cross-check the page count the document claims against what was read.
+    """
+    if po.pages_declared is not None and po.pages_declared != po.pages_seen:
+        add(
+            WARNING,
+            f"document declares {po.pages_declared} pages but {po.pages_seen} "
+            "item table(s) were read",
+        )
 
 
 def _check_totals(po: PurchaseOrder, add) -> None:

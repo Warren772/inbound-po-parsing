@@ -44,6 +44,15 @@ def broken():
     return load(FIXTURES / "broken_po.txt")
 
 
+MALFORMED = FIXTURES / "malformed"
+
+
+@pytest.fixture
+def malformed_dir():
+    """A corpus of POs that are wrong in one specific way each."""
+    return MALFORMED
+
+
 @pytest.fixture
 def template(tmp_path):
     """A stand-in for the provided template, which is not committed."""
