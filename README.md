@@ -96,7 +96,7 @@ Normalised to ISO `YYYY-MM-DD` and written as **text**, so Excel cannot
 reinterpret them under a local date format. 
 
 Slash dates are read US-style, month first. A first component above 12 is read
-day-first instead.
+day-first instead. Two-digit years resolve to 20xx (`5/02/26` -> `2026-05-02`).
 
 ### What is refused
 
