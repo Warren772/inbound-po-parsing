@@ -492,7 +492,7 @@ def parse_po(text: str, filename: str) -> PurchaseOrder:
         totals=totals,
         totals_line_no=None if totals_idx is None else totals_idx + 1,
         pages_seen=len(rulers),
-        pages_declared=_declared_pages(lines),
+        pages_declared=_declared_pages(lines, {n - 1 for n, _ in rows}),
     )
 
 
@@ -513,10 +513,13 @@ def _reject_layout_drift(lines: list[str], rulers: list[int], filename: str) -> 
             )
 
 
-def _declared_pages(lines: list[str]) -> int | None:
-    """The largest page count the document claims, or None if it never says."""
+def _declared_pages(lines: list[str], item_rows: set[int]) -> int | None:
+    """The largest page count the document claims, or None if it never says.
+    """
     declared = [
-        int(m.group(1)) for line in lines if (m := _PAGE_OF_RE.search(line))
+        int(m.group(1))
+        for i, line in enumerate(lines)
+        if i not in item_rows and (m := _PAGE_OF_RE.search(line))
     ]
     return max(declared) if declared else None
 
@@ -644,6 +647,8 @@ def _read_header(
     header = Header()
     reprinted_lines: set[str] = set()
     reprinted_labels: set[tuple[str, int]] = set()
+    # Where each label was printed, so a bad value can name its own line.
+    label_lines: dict[str, int] = {}
 
     consumed: set[int] = set()
     for i in range(first_ruler - 1):
@@ -670,11 +675,15 @@ def _read_header(
     above = [i for i in range(first_ruler - 1) if i not in consumed]
     for i in above:
         for label, value, col in _labels_in(lines[i]):
-            header.labels.setdefault(label, value)
+            if label not in header.labels:
+                header.labels[label] = value
+                label_lines[label] = i + 1
             reprinted_labels.add((label, col))   # a page break reprints this
     for i in range(end_idx, len(lines)):
         for label, value, _ in _labels_in(lines[i]):
-            header.labels.setdefault(label, value)
+            if label not in header.labels:
+                header.labels[label] = value
+                label_lines[label] = i + 1
 
     header.buyer = header.labels.get("BUYER", "")
     header.ship_terms = header.labels.get("SHIPTERMS", "")
@@ -682,13 +691,15 @@ def _read_header(
     header.ref_master_po = _first(header.labels, "REFMASTERPO#", "MASTERPO#")
 
     header.ship_date = _scalar(
-        parse_date, header.labels.get("SHIPDATE", ""), "SHIP DATE", filename
+        parse_date, header.labels.get("SHIPDATE", ""), "SHIP DATE", filename,
+        label_lines.get("SHIPDATE"),
     ) or ""
     header.total_invoice_value = _scalar(
         parse_decimal,
         header.labels.get("TOTALINVOICEVALUE", ""),
         "Total Invoice Value",
         filename,
+        label_lines.get("TOTALINVOICEVALUE"),
     )
     return header, _PageFurniture(
         frozenset(reprinted_lines), frozenset(reprinted_labels)
@@ -700,8 +711,10 @@ def _first(labels: dict[str, str], *keys: str) -> str:
     return next((labels[k] for k in keys if labels.get(k)), "")
 
 
-def _scalar(convert, raw: str, field_name: str, filename: str):
+def _scalar(convert, raw: str, field_name: str, filename: str, line_no: int | None):
     try:
         return convert(raw)
     except ValueError as exc:
-        raise ParseError(f"{field_name}: {exc}", filename=filename) from None
+        raise ParseError(
+            f"{field_name}: {exc}", filename=filename, line_no=line_no
+        ) from None

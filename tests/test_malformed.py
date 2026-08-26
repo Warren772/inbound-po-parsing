@@ -28,6 +28,7 @@ REJECTED = {
 }
 ACCEPTED = {
     "credit_lines.txt",
+    "extra_table_for_page_count.txt",
     "grand_totals_after_subtotal.txt",
     "page_marker_in_description.txt",
     "formula_injection.txt",
@@ -70,6 +71,7 @@ def test_rejected_file_names_itself_and_says_why(name, phrase):
     "name, line_no",
     [
         ("duplicate_qty_columns.txt", 5),   # the ruler line
+        ("impossible_ship_date.txt", 3),    # the header line the label sits on
         ("orphan_upc.txt", 6),
         ("shifted_second_page.txt", 11),   # the second page's ruler
         ("tabbed_columns.txt", 6),
@@ -150,12 +152,21 @@ def test_a_page_that_moves_its_columns_is_refused():
 
 
 def test_a_description_reading_like_a_page_marker_is_not_a_page_count():
-    """`CATALOG PAGE 2 OF 9` inside a description must not claim the document
-    has nine pages, which would raise a false missing-page warning and fail
-    an otherwise valid file under --strict."""
+    """Page counts are read from page furniture only. Item-row text is the
+    vendor's, so `CATALOG PAGE 2 OF 9` in a description must not claim nine
+    pages and fail an otherwise valid file under --strict."""
     po = load("page_marker_in_description.txt")
     assert po.pages_declared == 1
     assert not [i for i in validate(po) if "declares" in i.message]
+
+
+def test_more_tables_than_declared_pages_is_reported_too():
+    """A table the document does not account for is as much a misread as a
+    page walked past, so the cross-check runs in both directions."""
+    po = load("extra_table_for_page_count.txt")
+    assert (po.pages_declared, po.pages_seen) == (1, 2)
+    issues = [i for i in validate(po) if "declares" in i.message]
+    assert [i.severity for i in issues] == [WARNING]
 
 
 def test_upc_printed_in_its_own_column_is_kept():

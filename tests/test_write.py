@@ -179,8 +179,8 @@ def test_cli_reports_validation_errors_and_still_writes(
     assert "EXT QTY 12 != CTNS 5 x CSPK 2" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(not TEMPLATE.exists(), reason="provided template not present")
 def test_against_the_provided_template(sample, tmp_path):
+    """The template is committed, so this runs everywhere."""
     out = tmp_path / "out.xlsx"
     assert write_workbook([sample], TEMPLATE, out) == []
     assert [c.value for c in read(out)[1]] == TEMPLATE_COLUMNS

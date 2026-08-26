@@ -124,11 +124,11 @@ def _check_row_arithmetic(po: PurchaseOrder, add) -> None:
 def _check_pages(po: PurchaseOrder, add) -> None:
     """Cross-check the page count the document claims against what was read.
     """
-    if po.pages_declared is not None and po.pages_declared > po.pages_seen:
+    if po.pages_declared is not None and po.pages_declared != po.pages_seen:
         add(
             WARNING,
             f"document declares {po.pages_declared} pages but {po.pages_seen} "
-            "item table(s) were read; line items may be missing",
+            "item table(s) were read",
         )
 
 

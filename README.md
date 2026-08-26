@@ -181,7 +181,7 @@ po2xlsx/validate.py   the math checks
 po2xlsx/write.py      records -> workbook
 po2xlsx/cli.py        arguments, batch loop, error reporting
 samples/              the provided sample PO
-templates/            the provided blank template (not committed)
+templates/            the provided blank template
 tests/                pytest, with hand-built trimmed test cases
 tests/fixtures/malformed/   one whole PO per failure mode
 .github/workflows/ci.yml    matrix tests, lxml leg, per-commit replay

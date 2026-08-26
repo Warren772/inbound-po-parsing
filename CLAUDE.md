@@ -110,7 +110,7 @@ Do not tune to the sample. Specifically:
 - `write.py` — records -> workbook based on template
 - `validate.py` — the math checks
 - `cli.py` — argument handling, batch loop, error reporting
-- `templates/` — the provided blank template (do not commit)
+- `templates/` — the provided blank template
 - `samples/` — the provided sample PO (commit)
 
 Rules:
