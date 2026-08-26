@@ -2,6 +2,10 @@
 
 Converts fixed-width purchase-order text into `.xlsx`, one row per line item, using the column order defined by `templates/output_template_blank.xlsx`.
 
+The sample's own widths disagree with its ruler: `COST` prints six
+characters under a four-dash heading, `DESCRIPTION` runs twenty-three past
+its own. Hardcoding the sample's offsets assumes that no other PO differs.
+
 ## Running it
 
 ```bash
@@ -146,7 +150,9 @@ item tables read.
 ## Validation
 
 Checks run against every file and report to stderr as
-`severity: file:line: message`. 
+`severity: file:line: message`, and to the workbook: the blamed cell is filled
+(red error, amber warning) and a `Validation` sheet lists each finding. A clean
+file gets a "no discrepancies found" row. `Sheet1`'s schema is unchanged.
 
 * `EXT QTY` = `CTNS` × `CSPK`, per row
 * `EXT Cost` = `Cost` × `EXT QTY`, per row
@@ -186,6 +192,45 @@ tests/                pytest, with hand-built trimmed test cases
 tests/fixtures/malformed/   one whole PO per failure mode
 .github/workflows/ci.yml    matrix tests, lxml leg, per-commit replay
 ```
+
+## What refusal looks like
+
+Every failure names file and line.
+
+Cannot read it — exit `2`, writes nothing:
+
+```console
+$ python -m po2xlsx tests/fixtures/malformed/orphan_upc.txt
+error: orphan_upc.txt:6: continuation row '0001234567890' has no preceding item line to attach to
+
+$ python -m po2xlsx tests/fixtures/malformed/shifted_second_page.txt
+error: shifted_second_page.txt:11: this page's column ruler differs from page one's, so its rows cannot be sliced at the same offsets
+
+$ python -m po2xlsx tests/fixtures/malformed/text_in_numeric_column.txt
+error: text_in_numeric_column.txt:6: column 'COST': not a number: 'N/A'
+```
+
+Reads it, but its arithmetic disagrees — exit `1`, writes the workbook anyway:
+
+```console
+$ python -m po2xlsx tests/fixtures/broken_po.txt --out out/broken.xlsx
+error: broken_po.txt:17: EXT QTY 12 != CTNS 5 x CSPK 2 (10)
+error: broken_po.txt:17: EXT COST 55.000 != COST 5.500 x EXT QTY 12 (66.000)
+error: broken_po.txt:19: EXT COST 99.999 != COST 2.250 x EXT QTY 12 (27.000)
+error: broken_po.txt:21: TOTALS value 777.000 does not equal any column sum (retail=29.98, cost=7.750, ext_cost=154.999, ctns=9, cspk=5, ext_qty=24, cube=1.7345, kilograms=4.15)
+warning: broken_po.txt: no Total Invoice Value on the document to cross-check
+warning: broken_po.txt:19: item 5552 has no UPC continuation line
+```
+
+## What I would change with more time
+
+- **`Total Cost`** — the one column I guessed.
+- **Encoding** is two guesses (UTF-8, cp1252). 
+- **The `Validation` sheet is a list, not a report.** No grouping, no per-file
+  counts, no link back to the cell.
+- **No property-based test on the geometry.** The malformed corpus covers the
+  failures.
+- **`Decimal` stops at the workbook.** xlsx stores doubles.
 
 ## Approximate Time Spent 
 ~2 hours including agentic review loop.
