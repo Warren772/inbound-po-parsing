@@ -186,3 +186,6 @@ tests/                pytest, with hand-built trimmed test cases
 tests/fixtures/malformed/   one whole PO per failure mode
 .github/workflows/ci.yml    matrix tests, lxml leg, per-commit replay
 ```
+
+## Approximate Time Spent 
+~2 hours including agentic review loop.
