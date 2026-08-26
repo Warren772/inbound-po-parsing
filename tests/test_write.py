@@ -4,6 +4,7 @@ import openpyxl
 import pytest
 
 from po2xlsx.cli import main
+from po2xlsx.validate import validate
 from po2xlsx.write import (
     exact_decimal_serialisation,
     number_format,
@@ -252,3 +253,61 @@ def test_precision_patch_is_removed_again_afterwards():
         assert _writer.safe_string is not before
         assert warnings == []
     assert _writer.safe_string is before
+
+
+# --- validation surfaced in the workbook -----------------------------------
+
+
+def validation_rows(path):
+    sheet = openpyxl.load_workbook(path)["Validation"]
+    return [tuple(r) for r in sheet.iter_rows(min_row=2, values_only=True)]
+
+
+def test_clean_po_gets_a_no_discrepancy_row(sample, template, tmp_path):
+    """Silence and 'never checked' have to look different in the output."""
+    out = tmp_path / "clean.xlsx"
+    write_workbook([sample], template, out, issues=validate(sample))
+
+    workbook = openpyxl.load_workbook(out)
+    items = workbook.worksheets[0]
+    assert workbook.sheetnames == [items.title, "Validation"]
+    assert workbook.active is items                 # line items still open first
+    assert validation_rows(out) == [
+        ("ok", "purchase_order_sample.txt", None, None, "no discrepancies found")
+    ]
+
+    # The item sheet's schema is untouched
+    sheet = items
+    assert [c.value for c in sheet[1]] == TEMPLATE_COLUMNS
+    assert sheet.max_row == 1 + len(sample.items)
+    assert not any(
+        c.fill.fill_type == "solid" for row in sheet.iter_rows(min_row=2) for c in row
+    )
+
+
+def test_mismatched_row_is_filled_and_listed(broken, template, tmp_path):
+    """A bad EXT QTY has to be visible in the cell, not only in prose."""
+    out = tmp_path / "broken.xlsx"
+    issues = validate(broken)
+    write_workbook([broken], template, out, issues=issues)
+
+    sheet = openpyxl.load_workbook(out).worksheets[0]
+    bad = sheet.cell(row=2, column=column(sheet, "EXT QTY"))
+    assert bad.value == 12                              # value untouched
+    assert bad.fill.fill_type == "solid"
+    assert bad.fill.fgColor.rgb == "FFFFC7CE"           # error, not warning
+
+    # A cell with nothing wrong with it stays unfilled.
+    assert sheet.cell(row=2, column=column(sheet, "CTNS")).fill.fill_type != "solid"
+
+    listed = validation_rows(out)
+    assert ("error", "broken_po.txt", broken.items[0].line_no, "EXT QTY",
+            "EXT QTY 12 != CTNS 5 x CSPK 2 (10)") in listed
+    assert len(listed) == len(issues)                   # every finding reaches the sheet
+
+
+def test_issues_omitted_leaves_the_workbook_exactly_as_before(sample, template, tmp_path):
+    """The Validation sheet is opt-in; the old output contract is unchanged."""
+    out = tmp_path / "no_issues.xlsx"
+    write_workbook([sample], template, out)
+    assert "Validation" not in openpyxl.load_workbook(out).sheetnames
