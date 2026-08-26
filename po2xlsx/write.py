@@ -12,9 +12,10 @@ from pathlib import Path
 
 import openpyxl
 from openpyxl.cell import _writer
+from openpyxl.styles import Font, PatternFill
 
 from .parse import PurchaseOrder
-from .validate import match_totals
+from .validate import ERROR, Issue, match_totals
 
 __all__ = [
     "TOTAL_COST_MODES",
@@ -27,6 +28,16 @@ __all__ = [
 #: `Total Cost` is ambiguous in the brief. We support both readings, and the
 #: choice is recorded in the README.
 TOTAL_COST_MODES = ("invoice", "ext")
+
+#: Sheet appended alongside the line items when validation findings are passed
+#: in. Sheet1's schema is untouched, so the output contract still holds.
+VALIDATION_SHEET = "Validation"
+VALIDATION_COLUMNS = ("Severity", "File", "Line", "Column", "Message")
+
+#: Excel's own bad-cell and neutral-cell colours, so a flagged cell reads the
+#: way a spreadsheet user already expects it to.
+ERROR_FILL = PatternFill("solid", fgColor="FFFFC7CE")
+WARNING_FILL = PatternFill("solid", fgColor="FFFFEB9C")
 
 #: Excel's "Text" number format. Set explicitly so a value that *is* a
 #: str is still protected.
@@ -129,8 +140,11 @@ def write_workbook(
     template_path: str | Path,
     out_path: str | Path,
     total_cost_mode: str = "invoice",
+    issues: list[Issue] | None = None,
 ) -> list[str]:
     """Write every line item of every PO into a copy of the template.
+
+    Pass `issues` to surface validation findings in the workbook.
 
     Returns warnings about template headings we could not fill.
     """
@@ -157,6 +171,7 @@ def write_workbook(
     ]
 
     row = 2
+    rows_by_source: dict[tuple[str, int], int] = {}
     for po in pos:
         document_total = _resolve_total_cost(po)
         for item in po.items:
@@ -166,7 +181,15 @@ def write_workbook(
                 cell.number_format = fmt
                 if value is not None:
                     _set(cell, value, fmt)
+            rows_by_source[(po.filename, item.line_no)] = row
             row += 1
+
+    if issues is not None:
+        _flag_cells(sheet, headings, rows_by_source, issues)
+        headings_text = {
+            _normalise(c.value): c.value for c in sheet[1] if c.value
+        }
+        _append_validation_sheet(workbook, pos, issues, headings_text)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     with exact_decimal_serialisation() as precision_warnings:
@@ -184,6 +207,64 @@ def _set(cell, value, fmt) -> None:
     cell.value = value
     if fmt == TEXT and isinstance(value, str):
         cell.data_type = "s"
+
+
+#: Canonical field name -> the normalised template heading that carries it.
+_COLUMN_HEADINGS = {
+    field: heading
+    for mapping in (_ITEM_TEXT_FIELDS, _ITEM_NUMERIC_FIELDS)
+    for heading, field in mapping.items()
+}
+
+
+def _flag_cells(sheet, headings, rows_by_source, issues) -> None:
+    """Fill the cell each row-level finding blames.
+    """
+    for issue in issues:
+        if issue.line_no is None or issue.column is None:
+            continue
+        row = rows_by_source.get((issue.filename, issue.line_no))
+        heading = _COLUMN_HEADINGS.get(issue.column)
+        if row is None or heading is None or heading not in headings:
+            continue
+        cell = sheet.cell(row=row, column=headings.index(heading) + 1)
+        # An error already flagged must not be downgraded by a later warning.
+        if issue.severity == ERROR or cell.fill != ERROR_FILL:
+            cell.fill = ERROR_FILL if issue.severity == ERROR else WARNING_FILL
+
+
+def _append_validation_sheet(workbook, pos, issues, headings_text) -> None:
+    """Append the findings as their own sheet, one row per finding.
+
+    A file with nothing to report still gets a row: silence and "not checked"
+    look identical otherwise.
+    """
+    sheet = workbook.create_sheet(VALIDATION_SHEET)
+    sheet.append(list(VALIDATION_COLUMNS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    by_file: dict[str, list[Issue]] = {po.filename: [] for po in pos}
+    for issue in issues:
+        by_file.setdefault(issue.filename, []).append(issue)
+
+    for filename, found in by_file.items():
+        if not found:
+            sheet.append(["ok", filename, None, None, "no discrepancies found"])
+            continue
+        for issue in found:
+            key = _COLUMN_HEADINGS.get(issue.column or "")
+            sheet.append([
+                issue.severity, issue.filename, issue.line_no,
+                # The template's own spelling, so the sheet points at a column
+                # the reader can actually find in Sheet1.
+                headings_text.get(key, issue.column), issue.message,
+            ])
+
+    for column, width in zip("ABCDE", (10, 28, 8, 16, 96)):
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A2"
+    workbook.active = 0          # the line items stay the sheet that opens
 
 
 def _cell(po, item, key, total_cost_mode, document_total):

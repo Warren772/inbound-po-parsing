@@ -23,6 +23,9 @@ class Issue:
     filename: str
     line_no: int | None
     message: str
+    #: Canonical column at fault, when the check blames one. Lets the writer
+    #: flag the offending cell instead of only naming it in prose.
+    column: str | None = None
 
     def __str__(self) -> str:
         where = self.filename if self.line_no is None else f"{self.filename}:{self.line_no}"
@@ -78,8 +81,13 @@ def validate(po: PurchaseOrder) -> list[Issue]:
     """Every check, most specific first. Empty list means the document ties out."""
     issues: list[Issue] = []
 
-    def add(severity: str, message: str, line_no: int | None = None) -> None:
-        issues.append(Issue(severity, po.filename, line_no, message))
+    def add(
+        severity: str,
+        message: str,
+        line_no: int | None = None,
+        column: str | None = None,
+    ) -> None:
+        issues.append(Issue(severity, po.filename, line_no, message, column))
 
     if not po.items:
         add(ERROR, "no line items were found between the ruler and TOTALS")
@@ -102,6 +110,7 @@ def _check_row_arithmetic(po: PurchaseOrder, add) -> None:
                     f"EXT QTY {item.ext_qty} != CTNS {item.ctns} x CSPK "
                     f"{item.cspk} ({expected})",
                     item.line_no,
+                    "ext_qty",
                 )
         if None not in (item.cost, item.ext_qty, item.ext_cost):
             expected = item.cost * item.ext_qty
@@ -111,9 +120,11 @@ def _check_row_arithmetic(po: PurchaseOrder, add) -> None:
                     f"EXT COST {item.ext_cost} != COST {item.cost} x EXT QTY "
                     f"{item.ext_qty} ({expected})",
                     item.line_no,
+                    "ext_cost",
                 )
         if None not in (item.retail, item.cost) and item.retail < item.cost:
-            add(WARNING, f"RETAIL {item.retail} is below COST {item.cost}", item.line_no)
+            add(WARNING, f"RETAIL {item.retail} is below COST {item.cost}",
+                item.line_no, "retail")
         for name in ("ctns", "cspk", "ext_qty"):
             value = getattr(item, name)
             if value is not None and value <= 0:
@@ -188,10 +199,10 @@ def _check_completeness(po: PurchaseOrder, add) -> None:
     for item in po.items:
         if not item.upc:
             add(WARNING, f"item {item.sku or '?'} has no UPC continuation line",
-                item.line_no)
+                item.line_no, "upc")
         elif (first := seen.get(item.upc)) is not None:
             add(WARNING, f"UPC {item.upc} already appeared on line {first}",
-                item.line_no)
+                item.line_no, "upc")
         else:
             seen[item.upc] = item.line_no
 

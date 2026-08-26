@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     for issue in issues:
         print(issue, file=sys.stderr)
 
-    warnings = _write(parsed, args)
+    warnings = _write(parsed, args, issues)
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
 
@@ -119,15 +119,18 @@ def _read_source(path: Path) -> tuple[str, str | None]:
         raise ValueError(f"{path}: could not decode as UTF-8 or cp1252: {exc}") from None
 
 
-def _write(parsed, args) -> list[str]:
+def _write(parsed, args, issues) -> list[str]:
+    """Write the workbooks, carrying each file's findings into its own output."""
     if args.out:
         return write_workbook(
-            [po for _, po in parsed], args.template, args.out, args.total_cost
+            [po for _, po in parsed], args.template, args.out, args.total_cost,
+            issues=issues,
         )
     warnings = []
     for path, po in parsed:
         warnings += write_workbook(
-            [po], args.template, path.with_suffix(".xlsx"), args.total_cost
+            [po], args.template, path.with_suffix(".xlsx"), args.total_cost,
+            issues=[i for i in issues if i.filename == po.filename],
         )
     return warnings
 
