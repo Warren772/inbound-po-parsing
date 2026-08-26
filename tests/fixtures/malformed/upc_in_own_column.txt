@@ -1,0 +1,10 @@
+BUYER: 007 SAM RIVERA        Tiny Trading Co.        1/05/2027
+SHIP TERMS: FOB Busan,KOR    PURCHASE ORDER          PO#: AB1
+                             SHIP DATE: 12/31/27
+
+DEPT ITEM#   UPC           DESCRIPTION       RETAIL   COST EXT COST CTNS CSPK EXT QTY
+---- -----   ---           -----------       ------   ---- -------- ---- ---- -------
+0042 5551    0001234567890 WIDE LOAD          19.99  5.500   55.000    5    2      10
+0042 5552    0009876543210 SMALL BOX           9.99  2.250   27.000    4    3      12
+
+TOTALS:                                              82.000    9          22
